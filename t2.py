@@ -246,6 +246,13 @@ def main():
                             ("The Vedic Guru", "The Tarot Reader", "The Modern Life Coach"),
                             index=0)
             
+            # Store these values in session state
+            st.session_state.user_name = user_name
+            st.session_state.dob = dob
+            st.session_state.birth_time = birth_time
+            st.session_state.birth_place = birth_place
+            st.session_state.guide = guide
+            
             # Guide descriptions
             if guide == "The Vedic Guru":
                 st.info("Specializes in Vedic astrology, planetary positions, and ancient remedies.")
@@ -341,7 +348,11 @@ def show_chat_page():
     
     if clear_btn:
         st.session_state.messages = []
-        st.experimental_rerun()
+        # Use st.experimental_rerun() for older versions, or st.rerun() for newer versions
+        try:
+            st.rerun()
+        except:
+            st.experimental_rerun()
     
     if send_btn and question:
         if not st.session_state.api_key_valid:
@@ -350,7 +361,7 @@ def show_chat_page():
             # Add user message to chat history
             st.session_state.messages.append({"role": "user", "content": question})
             
-            # Get sidebar values
+            # Get values from session state
             user_name = st.session_state.get("user_name", "")
             dob = st.session_state.get("dob", date(1990, 1, 1))
             birth_time = st.session_state.get("birth_time", datetime.strptime("12:00", "%H:%M").time())
@@ -401,7 +412,11 @@ def show_chat_page():
                 st.session_state.messages.append({"role": "assistant", "content": answer, "guide": guide})
                 
                 # Rerun to update the chat display
-                st.experimental_rerun()
+                # Use st.experimental_rerun() for older versions, or st.rerun() for newer versions
+                try:
+                    st.rerun()
+                except:
+                    st.experimental_rerun()
                 
             except Exception as e:
                 st.error(f"An error occurred: {str(e)}")
