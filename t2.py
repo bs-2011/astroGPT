@@ -348,11 +348,9 @@ def show_chat_page():
     
     if clear_btn:
         st.session_state.messages = []
-        # Use st.experimental_rerun() for older versions, or st.rerun() for newer versions
-        try:
-            st.rerun()
-        except:
-            st.experimental_rerun()
+        # Use the current method to rerun
+        st.experimental_rerun = st.rerun if hasattr(st, 'rerun') else st.experimental_rerun
+        st.experimental_rerun()
     
     if send_btn and question:
         if not st.session_state.api_key_valid:
@@ -412,11 +410,9 @@ def show_chat_page():
                 st.session_state.messages.append({"role": "assistant", "content": answer, "guide": guide})
                 
                 # Rerun to update the chat display
-                # Use st.experimental_rerun() for older versions, or st.rerun() for newer versions
-                try:
-                    st.rerun()
-                except:
-                    st.experimental_rerun()
+                # Use the current method to rerun
+                st.experimental_rerun = st.rerun if hasattr(st, 'rerun') else st.experimental_rerun
+                st.experimental_rerun()
                 
             except Exception as e:
                 st.error(f"An error occurred: {str(e)}")
@@ -445,8 +441,6 @@ def show_features_page():
             <p>Blend spiritual wisdom with practical advice for modern life challenges.</p>
             <ul>
                 <li>Career guidance</li>
-                <li>Relationship advice</li>
-                <li>Personal growth strategies</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
