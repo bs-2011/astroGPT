@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 # ✅ Use provided key now; falls back to ENV when you move to prod
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or "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"
+OPENAI_API_KEY = "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"
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ──────────────────────────────────────────────────────────────────────────────
