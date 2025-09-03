@@ -1,519 +1,892 @@
-# Cosmic Guide — v2 (Streamlit)
-# Modernized UI + richer logic + Tarot + Numerology + Daily Banners
-# ---------------------------------------------------------------
-# Key upgrades vs v1:
-# - Gender capture & use in prompts
-# - Exact birth time (seconds) OR "unknown time" mode with scoped claims
-# - Distinct voices for 3 guides (less robotic, Melooha-style specificity)
-# - Tarot module (1- & 3-card spreads) with LLM interpretations
-# - Numerology (Life Path) and "Today" banner + newspaper-style daily horoscopes
-# - Clear "What to expect" for each guide in-UI
-# - Visual polish (cards, banners, chips) + better chat prompting & follow-ups
-# - Caching daily content to avoid repeated LLM calls
-
-import os
-from datetime import date, datetime, timedelta
-import random
-from typing import Dict, List, Tuple
-
 import streamlit as st
+import openai
+from datetime import datetime, date
+import random
+import requests
+from PIL import Image
+import io
+import base64
+import os
+import pytz
+import json
+from streamlit_lottie import st_lottie
 
-# OpenAI (new SDK style)
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
-
-# ---------------------------
-# ---------- THEME ----------
-# ---------------------------
+# Set page configuration
 st.set_page_config(
-    page_title="Cosmic Guide — AI Spiritual Companion",
+    page_title="Cosmic Guide - AI Spiritual Companion",
     page_icon="✨",
     layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Modern CSS (simple, classy)
-st.markdown(
-    r"""
+# Custom CSS for a premium look
+st.markdown("""
 <style>
-  :root {
-    --bg: #0b0b12;
-    --card: #10111a;
-    --ink: #e9e9f0;
-    --sub: #b7b8c9;
-    --accent: #8D72E1;
-    --accent-2: #6C4AB6;
-    --ok: #34d399;
-    --warn: #f59e0b;
-  }
-  .stApp { background: radial-gradient(1200px 800px at 10% 10%, #121222, var(--bg)) !important; }
-  h1, h2, h3, h4, h5, h6 { color: var(--ink) !important; }
-  .subtle { color: var(--sub); }
-  .card { background: linear-gradient(180deg, #141528 0%, #0e0f19 100%); border: 1px solid #23233a; border-radius: 16px; padding: 18px 18px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
-  .banner { background: linear-gradient(90deg, rgba(141,114,225,.18), rgba(108,74,182,.18)); border: 1px solid rgba(141,114,225,.35); padding: 14px 18px; border-radius: 14px; }
-  .chip { display:inline-block; padding:6px 12px; border:1px solid #2a2b44; border-radius:999px; margin:2px 6px 0 0; color:var(--ink); font-size:.85rem; }
-  .chip.badge { background: #191a2c; }
-  .pill { display:inline-block; padding:8px 14px; border-radius:999px; background: linear-gradient(135deg, #6C4AB6 0%, #8D72E1 100%); color:white; font-weight:600; }
-  .assistant { background:#0f1020; border:1px solid #23233a; border-radius:14px; padding:12px 14px; }
-  .user { background:linear-gradient(135deg, #6C4AB6, #8D72E1); color:white; border-radius:14px; padding:12px 14px; }
-  .horo-card { background:#0f1020; border:1px solid #2a2b44; padding:12px 12px; border-radius:12px; height:100%; }
-  .small { font-size:.9rem; }
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500;600&display=swap');
+    
+    .main {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Playfair Display', serif;
+        color: #2D2B4E;
+    }
+    
+    .stApp {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+    }
+    
+    .guide-card {
+        background: white;
+        border-radius: 15px;
+        padding: 25px;
+        margin: 15px 0;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-left: 4px solid #8D72E1;
+    }
+    
+    .guide-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
+    }
+    
+    .user-message {
+        background: linear-gradient(135deg, #6C4AB6 0%, #8D72E1 100%);
+        color: white;
+        border-radius: 18px 18px 0 18px;
+        padding: 15px 20px;
+        margin: 10px 0;
+        max-width: 80%;
+        margin-left: auto;
+    }
+    
+    .assistant-message {
+        background: white;
+        color: #2D2B4E;
+        border-radius: 18px 18px 18px 0;
+        padding: 15px 20px;
+        margin: 10px 0;
+        max-width: 80%;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        border: 1px solid #eaeaea;
+    }
+    
+    .stButton>button {
+        background: linear-gradient(135deg, #6C4AB6 0%, #8D72E1 100%);
+        color: white;
+        border: none;
+        border-radius: 50px;
+        padding: 12px 30px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        box-shadow: 0 5px 15px rgba(108, 74, 182, 0.3);
+    }
+    
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(108, 74, 182, 0.4);
+        background: linear-gradient(135deg, #5D3AA0 0%, #7B62C7 100%);
+    }
+    
+    .sidebar .sidebar-content {
+        background: linear-gradient(180deg, #2D2B4E 0%, #4A3B8C 100%);
+        color: white;
+    }
+    
+    .footer {
+        text-align: center;
+        padding: 20px;
+        margin-top: 40px;
+        color: #6C4AB6;
+        font-size: 0.9rem;
+        border-top: 1px solid #eaeaea;
+    }
+    
+    .feature-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.05);
+        height: 100%;
+        transition: transform 0.3s ease;
+    }
+    
+    .feature-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .pricing-card {
+        background: white;
+        border-radius: 15px;
+        padding: 30px;
+        text-align: center;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        margin: 15px 0;
+        transition: all 0.3s ease;
+        border: 2px solid transparent;
+    }
+    
+    .pricing-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
+        border: 2px solid #8D72E1;
+    }
+    
+    .premium {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .premium::before {
+        content: "POPULAR";
+        position: absolute;
+        top: 15px;
+        right: -30px;
+        background: #6C4AB6;
+        color: white;
+        padding: 5px 30px;
+        font-size: 0.7rem;
+        transform: rotate(45deg);
+    }
+    
+    .nav-item {
+        padding: 15px;
+        margin: 5px 0;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .nav-item:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .nav-item.active {
+        background-color: rgba(255, 255, 255, 0.2);
+        font-weight: bold;
+    }
+    
+    .daily-horoscope {
+        background: linear-gradient(135deg, #6C4AB6 0%, #8D72E1 100%);
+        color: white;
+        border-radius: 15px;
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    }
+    
+    .zodiac-selector {
+        display: flex;
+        overflow-x: auto;
+        gap: 10px;
+        padding: 10px 0;
+        margin: 15px 0;
+    }
+    
+    .zodiac-item {
+        flex: 0 0 auto;
+        text-align: center;
+        cursor: pointer;
+        padding: 10px;
+        border-radius: 10px;
+        transition: all 0.3s ease;
+    }
+    
+    .zodiac-item:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .zodiac-item.selected {
+        background-color: rgba(255, 255, 255, 0.2);
+        font-weight: bold;
+    }
+    
+    .tarot-card {
+        width: 120px;
+        height: 180px;
+        background: white;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        margin: 10px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        font-weight: bold;
+        text-align: center;
+        padding: 10px;
+    }
+    
+    .tarot-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    }
+    
+    .tarot-spread {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin: 20px 0;
+    }
+    
+    .birth-details-form {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 20px;
+        margin: 15px 0;
+    }
+    
+    .highlight-box {
+        background: linear-gradient(135deg, #6C4AB6 0%, #8D72E1 100%);
+        color: white;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 15px 0;
+    }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
-# ---------------------------
-# ------- SESSION ------------
-# ---------------------------
+# Initialize session state
 if "messages" not in st.session_state:
-    st.session_state.messages: List[Dict] = []
+    st.session_state.messages = []
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
-if "api_ok" not in st.session_state:
-    st.session_state.api_ok = False
+if "api_key_valid" not in st.session_state:
+    st.session_state.api_key_valid = False
 if "page" not in st.session_state:
     st.session_state.page = "Home"
-if "daily_cache" not in st.session_state:
-    st.session_state.daily_cache = {}
+if "zodiac_sign" not in st.session_state:
+    st.session_state.zodiac_sign = None
+if "daily_horoscope" not in st.session_state:
+    st.session_state.daily_horoscope = None
+if "tarot_cards" not in st.session_state:
+    st.session_state.tarot_cards = []
 
-MODEL = os.environ.get("COSMIC_MODEL", "gpt-4o-mini")  # fast & good; change if needed
-
-SIGNS = [
-    "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
-    "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"
-]
-
-# ---------------------------
-# ------ UTILITIES ----------
-# ---------------------------
-
-def require_openai():
-    if OpenAI is None:
-        st.error("OpenAI SDK not found. Install with: pip install openai>=1.0.0")
+# Load Lottie animations
+def load_lottieurl(url):
+    r = requests.get(url)
+    if r.status_code != 200:
         return None
-    if not st.session_state.api_key:
-        st.error("Add your OpenAI API key in the sidebar to use AI features.")
-        return None
+    return r.json()
+
+lottie_stars = load_lottieurl("https://assets1.lottiefiles.com/packages/lf20_myejiggj.json")
+lottie_moon = load_lottieurl("https://assets4.lottiefiles.com/packages/lf20_9mlame2v.json")
+lottie_crystal = load_lottieurl("https://assets1.lottiefiles.com/packages/lf20_k6yfqbbw.json")
+
+# Custom navigation function
+def navigate_to(page):
+    st.session_state.page = page
+
+# Generate daily horoscope
+def generate_daily_horoscope(zodiac_sign):
+    if not st.session_state.api_key_valid:
+        return "Please enter a valid OpenAI API key to get your daily horoscope."
+    
     try:
-        return OpenAI(api_key=st.session_state.api_key)
-    except Exception as e:
-        st.error(f"OpenAI init failed: {e}")
-        return None
-
-
-def llm(client: "OpenAI", system: str, user: str, temperature: float = 0.7) -> str:
-    try:
-        resp = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=temperature,
+        from openai import OpenAI
+        client = OpenAI(api_key=st.session_state.api_key)
+        
+        prompt = f"""
+        Generate a daily horoscope for {zodiac_sign} for today ({date.today().strftime('%B %d, %Y')}).
+        Make it personalized, engaging, and insightful. Include:
+        - Overall energy of the day
+        - Career focus
+        - Love and relationships
+        - Health and wellness
+        - Lucky numbers or colors
+        
+        Write it in a warm, conversational tone with emojis to make it engaging.
+        Keep it to about 150-200 words.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an expert astrologer with a warm, engaging style. You provide insightful daily horoscopes that feel personal and relevant."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8
         )
-        return resp.choices[0].message.content.strip()
+        
+        return response.choices[0].message.content
     except Exception as e:
-        st.error(f"LLM call failed: {e}")
-        return ""
+        return f"Error generating horoscope: {str(e)}"
 
+# Generate tarot reading
+def generate_tarot_reading(question, cards):
+    if not st.session_state.api_key_valid:
+        return "Please enter a valid OpenAI API key to get your tarot reading."
+    
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=st.session_state.api_key)
+        
+        card_descriptions = ", ".join([f"{card} ({'Upright' if random.random() > 0.5 else 'Reversed'})" for card in cards])
+        
+        prompt = f"""
+        The user has asked: "{question}"
+        
+        They have drawn the following tarot cards: {card_descriptions}
+        
+        Please provide a insightful tarot reading that:
+        1. Explains the significance of each card in relation to the question
+        2. Provides guidance based on the cards drawn
+        3. Offers practical advice or things to consider
+        4. Ends with an empowering message
+        
+        Write in a warm, mystical yet practical tone. Make it feel personal and meaningful.
+        Use about 200-250 words.
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an experienced tarot reader with deep intuition and wisdom. You provide meaningful interpretations that help people gain clarity and insight."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error generating tarot reading: {str(e)}"
 
-def calc_life_path(d: date) -> int:
-    # Master numbers preserved (11, 22, 33)
-    s = sum(int(ch) for ch in d.strftime("%Y%m%d"))
-    while s not in (11, 22, 33) and s > 9:
-        s = sum(int(ch) for ch in str(s))
-    return s
-
-
-# Tarot Major Arcana (compact meanings)
-TAROT = {
-    "The Fool": ("new beginnings, leap of faith", "recklessness, naivety"),
-    "The Magician": ("manifestation, skill, willpower", "manipulation, untapped potential"),
-    "The High Priestess": ("intuition, hidden knowledge", "secrets, disconnected self"),
-    "The Empress": ("abundance, nurture, creation", "dependence, creative block"),
-    "The Emperor": ("structure, leadership", "rigidity, control"),
-    "The Hierophant": ("tradition, guidance", "rebellion, new paths"),
-    "The Lovers": ("union, choices, values alignment", "disharmony, difficult choices"),
-    "The Chariot": ("drive, victory", "scattered energy, lack of control"),
-    "Strength": ("courage, compassion, inner power", "self-doubt, raw emotion"),
-    "The Hermit": ("introspection, wisdom", "isolation, withdrawal"),
-    "Wheel of Fortune": ("cycles, luck, change", "resistance to change"),
-    "Justice": ("truth, fairness, law", "bias, unfairness"),
-    "The Hanged Man": ("surrender, new perspective", "stalling, martyrdom"),
-    "Death": ("endings → rebirth", "resistance, stagnation"),
-    "Temperance": ("balance, healing", "excess, discord"),
-    "The Devil": ("attachments, materialism", "release, awareness"),
-    "The Tower": ("sudden change, revelation", "avoidance of upheaval"),
-    "The Star": ("hope, renewal", "doubt, fade of faith"),
-    "The Moon": ("intuition, the unknown", "fear, confusion"),
-    "The Sun": ("joy, clarity, success", "temporary gloom, arrogance"),
-    "Judgement": ("awakening, reckoning", "self-doubt, harsh self-judgment"),
-    "The World": ("completion, integration", "unfinished business"),
-}
-
-
-def draw_tarot(n: int) -> List[Tuple[str, str]]:
-    cards = random.sample(list(TAROT.keys()), k=n)
-    out = []
-    for c in cards:
-        orientation = random.choice(["upright", "reversed"])  # 50/50
-        out.append((c, orientation))
-    return out
-
-
-# ---------------------------
-# ------ PERSONAS -----------
-# ---------------------------
-
-EXPECTATIONS = {
-    "The Vedic Guru": {
-        "Expect": "Planet-focused insight (Sun/Moon/Dasha vibes), 2–3 specific doables (mantra, daan, routine) and practical timing cues.",
-        "BestFor": "Career timing, relationship themes, remedy ideas, vibe of the month.",
-        "Tone": "Warm, precise, rooted in Jyotish; avoids fatalism; short, poetic lines à la Melooha."},
-    "The Tarot Reader": {
-        "Expect": "Card-by-card story with past/present/future or single insight; emotional and intuitive framing.",
-        "BestFor": "Decisions at crossroads, feelings/energy check, near-term nudges.",
-        "Tone": "Empathic, reflective, metaphor-rich but grounded with 2 concrete actions."},
-    "The Modern Life Coach": {
-        "Expect": "Clear steps, SMART goals, mental models, week-plan.",
-        "BestFor": "Career pivots, habits, health/love comms, productivity.",
-        "Tone": "Straight-talking, motivational, actionable (bullets + micro-commitments)."},
-}
-
-PERSONA_PROMPTS = {
-    "The Vedic Guru": (
-        "You are a compassionate, Melooha-style Vedic guide. Be warm, "+
-        "specific and non-generic. If birth time is unknown, avoid house-level claims. "+
-        "Give 2–3 practical upaya/remedies and 3 concrete actions. No superstition, no absolutes."
-    ),
-    "The Tarot Reader": (
-        "You are an intuitive tarot reader. Weave a brief narrative based on drawn cards (if any). "+
-        "Offer 2 grounded actions. Avoid fatalism; empower the user."
-    ),
-    "The Modern Life Coach": (
-        "You are a crisp life coach. Mirror the user's goal, ask one clarifying question only if essential, "+
-        "then deliver a numbered mini-plan with deadlines and metrics."
-    ),
-}
-
-# ---------------------------
-# ------- DAILY CONTENT ------
-# ---------------------------
-
-def get_today_key() -> str:
-    return date.today().isoformat()
-
-
-def daily_banner(client: "OpenAI") -> Dict[str, str]:
-    key = (get_today_key(), "banner")
-    if key in st.session_state.daily_cache:
-        return st.session_state.daily_cache[key]
-    prompt = (
-        "Give a 3–4 line, upbeat 'Today at a glance' for Indian audience: "+
-        "mention weekday meaning (culturally neutral), a gentle intention, and a one-liner for career/love/health."
-    )
-    text = llm(client, "You write concise, friendly newspaper banners.", prompt, temperature=0.6)
-    out = {"text": text}
-    st.session_state.daily_cache[key] = out
-    return out
-
-
-def daily_horoscopes(client: "OpenAI") -> Dict[str, str]:
-    key = (get_today_key(), "horos")
-    if key in st.session_state.daily_cache:
-        return st.session_state.daily_cache[key]
-    prompt = (
-        "Write newspaper-style daily horoscopes for the 12 zodiac signs (Aries..Pisces). "
-        "One crisp sentence each, max 22 words, actionable and non-fatalistic. Prefix each line with 'Sign:'."
-    )
-    text = llm(client, "You are a witty horoscope columnist.", prompt, temperature=0.8)
-    # Parse lines "Sign: ..."
-    out: Dict[str, str] = {}
-    for line in text.splitlines():
-        if ":" in line:
-            head, body = line.split(":", 1)
-            k = head.strip().replace("**", "")
-            v = body.strip().strip("- ")
-            if k in SIGNS and v:
-                out[k] = v
-    # Ensure all signs present
-    for s in SIGNS:
-        out.setdefault(s, "Take a mindful pause, choose one tiny step that improves your day.")
-    st.session_state.daily_cache[key] = out
-    return out
-
-
-# ---------------------------
-# --------- SIDEBAR ---------
-# ---------------------------
-
-def sidebar():
+# Main app
+def main():
+    # Sidebar navigation
     with st.sidebar:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("<h3>✨ Cosmic Guide</h3><p class='subtle'>Your AI spiritual companion</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        # Logo
+        st.markdown(
+            """
+            <div style="text-align: center; margin-bottom: 30px;">
+                <h1 style="color: white; font-size: 24px;">✨ Cosmic Guide</h1>
+                <p style="color: #ccc;">Your AI Spiritual Companion</p>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+        
+        # Navigation menu
+        menu_options = {
+            "Home": "house",
+            "Chat": "chat",
+            "Features": "star",
+            "Pricing": "currency-rupee",
+            "About": "info-circle"
+        }
+        
+        for option, icon in menu_options.items():
+            is_active = st.session_state.page == option
+            emoji = "🌙" if option == "Home" else "🔮" if option == "Chat" else "⭐" if option == "Features" else "💰" if option == "Pricing" else "ℹ️"
+            if st.button(f"{emoji} {option}", key=f"nav_{option}", use_container_width=True):
+                navigate_to(option)
+        
+        st.markdown("---")
+        
+        # Only show API key input on Chat page
+        if st.session_state.page == "Chat":
+            st.header("🔮 Your Cosmic Profile")
+            
+            # API Key Input
+            api_key = st.text_input("Enter your OpenAI API Key:", type="password", 
+                                   help="Get your API key from https://platform.openai.com/api-keys")
+            
+            if api_key:
+                st.session_state.api_key = api_key
+                st.session_state.api_key_valid = True
+                st.success("API key saved successfully!")
+            
+            st.markdown("---")
+            
+            # User information
+            with st.expander("Personal Details", expanded=True):
+                user_name = st.text_input("Your Name", placeholder="Enter your name")
+                gender = st.selectbox("Gender", ["Male", "Female", "Non-binary", "Prefer not to say"])
+                dob = st.date_input("Date of Birth", value=date(1990, 1, 1), 
+                                   min_value=date(1900, 1, 1), 
+                                   max_value=date.today())
+                birth_time = st.text_input("Exact Time of Birth (HH:MM)", value="12:00", 
+                                         help="Enter your exact time of birth in 24-hour format (e.g., 14:30 for 2:30 PM)")
+                birth_place = st.text_input("Place of Birth", placeholder="City, Country")
+            
+            st.markdown("---")
+            
+            # Guide selection
+            st.header("Choose Your Guide")
+            guide = st.radio("Select a spiritual guide:", 
+                            ("The Vedic Guru", "The Tarot Reader", "The Modern Life Coach", "Numerology Expert"),
+                            index=0)
+            
+            # Guide descriptions
+            if guide == "The Vedic Guru":
+                st.info("Specializes in Vedic astrology, planetary positions, and ancient remedies. Expect detailed astrological insights based on your birth chart.")
+            elif guide == "The Tarot Reader":
+                st.info("Provides insights through tarot card interpretations and intuitive guidance. Expect card draws and mystical interpretations.")
+            elif guide == "The Modern Life Coach":
+                st.info("Offers practical life advice blending modern coaching with spiritual wisdom. Expect actionable steps and motivational guidance.")
+            else:
+                st.info("Analyzes numbers from your birth date and name to reveal life paths and destinies. Expect numerological calculations and insights.")
+            
+            # Store these values in session state
+            st.session_state.user_name = user_name
+            st.session_state.gender = gender
+            st.session_state.dob = dob
+            st.session_state.birth_time = birth_time
+            st.session_state.birth_place = birth_place
+            st.session_state.guide = guide
+    
+    # Render the current page
+    if st.session_state.page == "Home":
+        show_home_page()
+    elif st.session_state.page == "Chat":
+        show_chat_page()
+    elif st.session_state.page == "Features":
+        show_features_page()
+    elif st.session_state.page == "Pricing":
+        show_pricing_page()
+    elif st.session_state.page == "About":
+        show_about_page()
 
-        api = st.text_input("OpenAI API key", type="password", help="Kept in memory only for this session.")
-        if api:
-            st.session_state.api_key = api
-            st.session_state.api_ok = True
-            st.success("API key saved.")
-
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("<h4>🧘 Your Cosmic Profile</h4>", unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("Name", value=st.session_state.get("user_name", ""))
-            gender = st.selectbox("Gender", ["Prefer not to say", "Female", "Male", "Non-binary", "Other"], index=0)
-        with col2:
-            dob = st.date_input("Date of Birth", value=st.session_state.get("dob", date(1995,1,1)))
-            unknown_time = st.checkbox("I don't know my birth time", value=st.session_state.get("unknown_time", False))
-        if not unknown_time:
-            bt = st.time_input(
-                "Time of Birth (hh:mm:ss)",
-                value=st.session_state.get("birth_time", datetime.strptime("12:00:00", "%H:%M:%S").time()),
-                step=timedelta(seconds=1),
-            )
-        else:
-            bt = None
-        place = st.text_input("Place of Birth (City, Country)", value=st.session_state.get("birth_place", ""))
-
-        st.session_state.update({
-            "user_name": name,
-            "gender": gender,
-            "dob": dob,
-            "unknown_time": unknown_time,
-            "birth_time": bt,
-            "birth_place": place,
-        })
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ---------------------------
-# -------- HOME PAGE --------
-# ---------------------------
-
-def page_home():
-    client = require_openai()
-    st.markdown("# 🌌 Cosmic Guide")
-    st.markdown("<div class='banner'>Discover personalized spiritual guidance through a friendly AI. Choose a guide, ask a question, and get specific, human-like answers — not generic fluff.</div>", unsafe_allow_html=True)
-
-    if client:
-        ban = daily_banner(client)
-        st.markdown("\n### Today at a glance")
-        st.markdown(f"<div class='card'>{ban['text']}</div>", unsafe_allow_html=True)
-
-        st.markdown("\n### Newspaper-style daily horoscopes")
-        data = daily_horoscopes(client)
-        rows = [SIGNS[i:i+4] for i in range(0, len(SIGNS), 4)]
-        for row in rows:
-            cols = st.columns(len(row))
-            for s, c in zip(row, cols):
-                with c:
-                    st.markdown(f"""
-                        <div class='horo-card'>
-                          <div class='subtle small'>{s}</div>
-                          <div style='margin-top:6px'>{data.get(s, '')}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-    st.markdown("\n### Why people use Cosmic Guide")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("<div class='card'><b>Specific, kind answers</b><br><span class='subtle small'>Distinct voices; we ask for context and give concrete next steps.</span></div>", unsafe_allow_html=True)
-    with c2:
-        st.markdown("<div class='card'><b>Beyond horoscopes</b><br><span class='subtle small'>Tarot, numerology, and coaching — all in one app.</span></div>", unsafe_allow_html=True)
-    with c3:
-        st.markdown("<div class='card'><b>Privacy-first</b><br><span class='subtle small'>Your data stays in your session; no third-party sharing.</span></div>", unsafe_allow_html=True)
-
-
-# ---------------------------
-# -------- CHAT PAGE --------
-# ---------------------------
-
-def persona_card(title: str):
-    exp = EXPECTATIONS[title]
-    st.markdown(
-        f"""
-        <div class='card'>
-            <div class='pill'>{title}</div>
-            <div style='margin-top:10px'><b>What to expect:</b> <span class='subtle'>{exp['Expect']}</span></div>
-            <div style='margin-top:6px'><b>Best for:</b> <span class='subtle'>{exp['BestFor']}</span></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def format_profile() -> str:
-    n = st.session_state.get("user_name") or "friend"
-    g = st.session_state.get("gender", "")
-    dob = st.session_state.get("dob")
-    bt = st.session_state.get("birth_time")
-    place = st.session_state.get("birth_place", "")
-    lp = calc_life_path(dob) if isinstance(dob, date) else ""
-    birth_time_str = "unknown" if st.session_state.get("unknown_time") else (bt.strftime("%H:%M:%S") if bt else "unknown")
-    return (
-        f"Name: {n}. Gender: {g}. DOB: {dob}. Birth time: {birth_time_str}. "
-        f"Birth place: {place}. Life Path: {lp}."
-    )
-
-
-def build_system_prompt(guide: str) -> str:
-    profile = format_profile()
-    accuracy_note = (
-        "Birth time unknown → avoid house-level or minute-sensitive claims; prefer themes and actions."
-        if st.session_state.get("unknown_time") else
-        "You may reference timing/themes, but avoid hard predictions."
-    )
-    persona = PERSONA_PROMPTS[guide]
-    return (
-        f"{persona}\n\nContext: {profile}\n{accuracy_note}\n"
-        "Rules: No medical/legal advice; be concise but human. Avoid generic platitudes. Use bullets."
-    )
-
-
-def chat_section():
-    st.markdown("# 💬 Chat with your Guide")
-
-    # Persona chooser
-    colP1, colP2, colP3 = st.columns(3)
-    with colP1: persona_card("The Vedic Guru")
-    with colP2: persona_card("The Tarot Reader")
-    with colP3: persona_card("The Modern Life Coach")
-
-    guide = st.radio("Choose a guide", list(EXPECTATIONS.keys()), horizontal=True)
-
-    # Quick prompts
-    st.markdown("<div class='subtle small'>Quick asks:</div>", unsafe_allow_html=True)
-    qs = st.container()
-    with qs:
-        cols = st.columns(6)
-        quicks = [
-            "Career focus this month",
-            "Best business niches for me",
-            "Love & relationships guidance",
-            "Health & habits to improve",
-            "Money mindset & luck cues",
-            "One bold risk to take",
-        ]
-        for i, (c, txt) in enumerate(zip(cols*2, quicks)):
-            if c.button(txt, key=f"q_{i}"):
-                st.session_state.setdefault("messages", []).append({"role": "user", "content": txt, "guide": guide})
-
-    # Chat history display
-    for m in st.session_state.messages:
-        if m.get("guide", guide) != guide:
-            continue
-        if m["role"] == "user":
-            st.markdown(f"<div class='user'><b>You:</b> {m['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='assistant'><b>{guide}:</b> {m['content']}</div>", unsafe_allow_html=True)
-
-    # Input
-    q = st.text_input("Ask your question…", placeholder="e.g., Which career paths align with my strengths?")
-    left, right = st.columns([1, 6])
-    send = left.button("Send")
-    clear = right.button("Clear chat")
-
-    if clear:
-        st.session_state.messages = []
-        st.rerun()
-
-    if send and q:
-        st.session_state.messages.append({"role": "user", "content": q, "guide": guide})
-        client = require_openai()
-        if client:
-            with st.spinner("Thinking…"):
-                system = build_system_prompt(guide)
-                # Tarot: include drawn cards if relevant
-                user_prompt = q
-                answer = llm(client, system, user_prompt, temperature=0.9)
-            st.session_state.messages.append({"role": "assistant", "content": answer, "guide": guide})
-            st.rerun()
-
-
-# ---------------------------
-# -------- TAROT PAGE -------
-# ---------------------------
-
-def page_tarot():
-    st.markdown("# 🃏 Tarot Studio")
-    spread = st.selectbox("Choose a spread", ["One Card Insight", "Three Card — Past/Present/Future"])  # can add more later
-    q = st.text_input("Your question (optional)")
-    draw = st.button("Draw cards")
-
-    if draw:
-        n = 1 if spread.startswith("One") else 3
-        cards = draw_tarot(n)
-        cols = st.columns(n)
-        for (name, orient), c in zip(cards, cols):
-            up, rev = TAROT[name]
-            meaning = up if orient == "upright" else rev
-            c.markdown(f"<div class='card'><b>{name}</b><br><span class='subtle'>{orient}</span><br><div style='margin-top:6px'>{meaning}</div></div>", unsafe_allow_html=True)
-
-        client = require_openai()
-        if client:
-            joined = ", ".join([f"{n} ({o})" for n, o in cards])
-            sys = (
-                PERSONA_PROMPTS["The Tarot Reader"]
-                + "\nUse the listed cards. Keep it empowering and specific with 2 actions."
-            )
-            usr = (
-                f"Cards drawn: {joined}. "
-                f"Question: {q or 'No question provided — give a relevant general insight.'}"
-            )
-            with st.spinner("Reading cards…"):
-                text = llm(require_openai(), sys, usr, temperature=0.9)
-            st.markdown(f"<div class='assistant'>{text}</div>", unsafe_allow_html=True)
-
-
-# ---------------------------
-# ------ NUMEROLOGY ----------
-# ---------------------------
-
-def page_numerology():
-    st.markdown("# 🔢 Numerology")
-    dob = st.session_state.get("dob", date(1995,1,1))
-    lp = calc_life_path(dob)
-
-    col1, col2 = st.columns([1,2])
+def show_home_page():
+    col1, col2 = st.columns([1, 1])
+    
     with col1:
-        st.markdown(f"<div class='card'><div class='pill'>Life Path</div><h2 style='margin-top:8px'>{lp}</h2><div class='subtle small'>DOB: {dob}</div></div>", unsafe_allow_html=True)
+        st.markdown("# Cosmic Guide")
+        st.markdown("### Your AI-Powered Spiritual Companion")
+        st.markdown("""
+        Discover personalized spiritual guidance through the power of AI. 
+        Whether you're seeking answers about love, career, or personal growth, 
+        our AI guides are here to provide insights and clarity.
+        """)
+        
+        if st.button("Get Started", key="home_btn"):
+            navigate_to("Chat")
+    
     with col2:
-        client = require_openai()
-        if client:
-            brief = llm(
-                client,
-                "You are a numerology coach. Be concrete and kind.",
-                f"Explain Life Path {lp} strengths, blind spots, and 3 practical focus areas this month in 120 words.",
-                temperature=0.7,
-            )
-            st.markdown(f"<div class='card'>{brief}</div>", unsafe_allow_html=True)
+        if lottie_stars:
+            st_lottie(lottie_stars, height=300, key="stars")
+    
+    st.markdown("---")
+    
+    # Daily Horoscope Section
+    st.markdown("## 📅 Today's Cosmic Energy")
+    
+    zodiac_signs = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", 
+                   "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
+    
+    # Create zodiac selector
+    st.markdown("### Select your zodiac sign:")
+    cols = st.columns(6)
+    for i, sign in enumerate(zodiac_signs):
+        with cols[i % 6]:
+            if st.button(f"♈{sign}" if i == 0 else 
+                        f"♉{sign}" if i == 1 else
+                        f"♊{sign}" if i == 2 else
+                        f"♋{sign}" if i == 3 else
+                        f"♌{sign}" if i == 4 else
+                        f"♍{sign}" if i == 5 else
+                        f"♎{sign}" if i == 6 else
+                        f"♏{sign}" if i == 7 else
+                        f"♐{sign}" if i == 8 else
+                        f"♑{sign}" if i == 9 else
+                        f"♒{sign}" if i == 10 else
+                        f"♓{sign}"):
+                st.session_state.zodiac_sign = sign
+    
+    if st.session_state.zodiac_sign:
+        st.markdown(f"### Your {st.session_state.zodiac_sign} Horoscope for Today")
+        
+        if st.button("Generate Daily Horoscope"):
+            with st.spinner("Consulting the stars..."):
+                horoscope = generate_daily_horoscope(st.session_state.zodiac_sign)
+                st.session_state.daily_horoscope = horoscope
+        
+        if st.session_state.daily_horoscope:
+            st.markdown(f'<div class="daily-horoscope">{st.session_state.daily_horoscope}</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    st.markdown("## How It Works")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>1. Choose Your Guide</h3>
+            <p>Select from Vedic, Tarot, Life Coach, or Numerology perspectives</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>2. Share Your Details</h3>
+            <p>Provide your birth details for personalized insights</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>3. Receive Guidance</h3>
+            <p>Get personalized insights based on your unique cosmic blueprint</p>
+        </div>
+        """, unsafe_allow_html=True)
 
+def show_chat_page():
+    st.markdown("# Chat with Your Guide")
+    
+    # Display guide information
+    guide = st.session_state.get("guide", "The Vedic Guru")
+    
+    if guide == "The Vedic Guru":
+        st.markdown("""
+        <div class="highlight-box">
+            <h3>🧘 The Vedic Guru</h3>
+            <p>Specializes in Vedic astrology based on your birth details. Provides insights on planetary influences, doshas, and remedies. Expect detailed astrological analysis and spiritual guidance.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    elif guide == "The Tarot Reader":
+        st.markdown("""
+        <div class="highlight-box">
+            <h3>🔮 The Tarot Reader</h3>
+            <p>Uses tarot cards to provide intuitive guidance. Can help with specific questions about love, career, or personal growth. Expect mystical insights and symbolic interpretations.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    elif guide == "The Modern Life Coach":
+        st.markdown("""
+        <div class="highlight-box">
+            <h3>💼 The Modern Life Coach</h3>
+            <p>Blends spiritual wisdom with practical advice. Helps with goal setting, motivation, and personal development. Expect actionable steps and empowering guidance.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="highlight-box">
+            <h3>🔢 Numerology Expert</h3>
+            <p>Analyzes numbers from your birth date and name to reveal life paths, destinies, and personal traits. Expect calculations of life path numbers, expression numbers, and more.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Tarot card selection for Tarot Reader
+    if guide == "The Tarot Reader":
+        st.markdown("### Select Your Tarot Spread")
+        
+        tarot_deck = [
+            "The Fool", "The Magician", "The High Priestess", "The Empress", "The Emperor",
+            "The Hierophant", "The Lovers", "The Chariot", "Strength", "The Hermit",
+            "Wheel of Fortune", "Justice", "The Hanged Man", "Death", "Temperance",
+            "The Devil", "The Tower", "The Star", "The Moon", "The Sun", "Judgement", "The World"
+        ]
+        
+        if st.button("Draw 3 Cards", key="draw_cards"):
+            st.session_state.tarot_cards = random.sample(tarot_deck, 3)
+        
+        if st.session_state.tarot_cards:
+            st.markdown("### Your Cards:")
+            cols = st.columns(3)
+            for i, card in enumerate(st.session_state.tarot_cards):
+                with cols[i]:
+                    st.markdown(f'<div class="tarot-card">{card}</div>', unsafe_allow_html=True)
+    
+    # Chat container
+    chat_container = st.container()
+    
+    with chat_container:
+        # Display chat messages
+        for message in st.session_state.messages:
+            if message["role"] == "user":
+                st.markdown(f'<div class="user-message"><b>You:</b> {message["content"]}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="assistant-message"><b>{message["guide"]}:</b> {message["content"]}</div>', unsafe_allow_html=True)
+    
+    # Chat input at bottom
+    st.markdown("---")
+    question = st.text_input("Ask your question...", key="input", 
+                            placeholder="e.g., What does my career horoscope say for this month?")
+    
+    col1, col2 = st.columns([1, 6])
+    with col1:
+        send_btn = st.button("Send", use_container_width=True)
+    with col2:
+        clear_btn = st.button("Clear Chat", use_container_width=True)
+    
+    if clear_btn:
+        st.session_state.messages = []
+        st.session_state.tarot_cards = []
+        st.experimental_rerun()
+    
+    if send_btn and question:
+        if not st.session_state.api_key_valid:
+            st.error("Please enter a valid OpenAI API key in the sidebar to continue.")
+        else:
+            # Add user message to chat history
+            st.session_state.messages.append({"role": "user", "content": question})
+            
+            # Get values from session state
+            user_name = st.session_state.get("user_name", "Seeker")
+            gender = st.session_state.get("gender", "")
+            dob = st.session_state.get("dob", date(1990, 1, 1))
+            birth_time = st.session_state.get("birth_time", "12:00")
+            birth_place = st.session_state.get("birth_place", "")
+            guide = st.session_state.get("guide", "The Vedic Guru")
+            
+            # Define guide personalities with more detailed prompts
+            guide_personalities = {
+                "The Vedic Guru": f"""You are a compassionate Vedic astrologer with deep knowledge of Jyotish. 
+                The user's name is {user_name}, gender is {gender}, born on {dob} at {birth_time} in {birth_place}.
+                
+                Provide specific insights based on their birth details. Reference planetary positions, nakshatras, 
+                and doshas when relevant. Offer practical remedies (like mantras, gemstones, or rituals) when appropriate.
+                
+                Speak with wisdom and warmth, using terms like "Dear {user_name}" and offering blessings. 
+                Be specific rather than general, and make the guidance personal to their situation.
+                Keep responses under 200 words but make them meaningful.""",
+                
+                "The Tarot Reader": f"""You are an intuitive tarot reader with a mystical yet practical approach.
+                The user has drawn these cards: {', '.join(st.session_state.tarot_cards) if st.session_state.tarot_cards else 'No cards drawn yet'}.
+                
+                Interpret the cards in relation to their question: "{question}". Explain the symbolism, both upright 
+                and reversed meanings, and how they apply to the user's situation. Offer guidance rather than predictions.
+                
+                Speak in a poetic, metaphorical style while keeping the advice practical. Use emojis occasionally to add warmth.
+                Keep responses under 200 words but make them insightful.""",
+                
+                "The Modern Life Coach": f"""You are a practical life coach who blends spiritual wisdom with actionable advice.
+                The user's name is {user_name}, gender is {gender}, born on {dob}.
+                
+                Help them find clarity and take positive steps in their lives. Offer concrete advice, exercises, 
+                or perspectives that they can apply immediately. Focus on empowerment and self-discovery.
+                
+                Speak in an encouraging, motivational tone. Use modern coaching techniques alongside spiritual principles.
+                Keep responses under 200 words but make them actionable.""",
+                
+                "Numerology Expert": f"""You are a numerology expert who analyzes numbers from birth dates and names.
+                The user's name is {user_name}, born on {dob}.
+                
+                Calculate their life path number, expression number, or other relevant numerological aspects.
+                Explain what these numbers mean for their personality, strengths, challenges, and life purpose.
+                
+                Speak with authority but warmth, making the numerical insights personal and relevant to their question.
+                Keep responses under 200 words but make them informative."""
+            }
+            
+            # Prepare the prompt
+            system_prompt = guide_personalities[guide]
+            
+            try:
+                # Initialize OpenAI client
+                from openai import OpenAI
+                client = OpenAI(api_key=st.session_state.api_key)
+                
+                # Show typing indicator
+                with st.spinner(f"{guide} is thinking..."):
+                    # For tarot readings, use the specialized function
+                    if guide == "The Tarot Reader" and st.session_state.tarot_cards:
+                        answer = generate_tarot_reading(question, st.session_state.tarot_cards)
+                    else:
+                        # Generate response
+                        response = client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": question}
+                            ],
+                            temperature=0.8 if guide == "The Tarot Reader" else 0.7
+                        )
+                        answer = response.choices[0].message.content
+                
+                # Add assistant message to chat history
+                st.session_state.messages.append({"role": "assistant", "content": answer, "guide": guide})
+                
+                # Rerun to update the chat display
+                st.experimental_rerun()
+                
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
 
-# ---------------------------
-# ----------- APP -----------
-# ---------------------------
+def show_features_page():
+    st.markdown("# Features")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        <div class="guide-card">
+            <h3>🔮 Vedic Astrology</h3>
+            <p>Get insights based on Vedic astrology principles, planetary positions, and ancient wisdom.</p>
+            <ul>
+                <li>Personalized birth chart analysis</li>
+                <li>Planetary period (Dasha) predictions</li>
+                <li>Remedies and solutions</li>
+                <li>Compatibility analysis</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="guide-card">
+            <h3>💼 Life Coaching</h3>
+            <p>Blend spiritual wisdom with practical advice for modern life challenges.</p>
+            <ul>
+                <li>Career guidance</li>
+                <li>Relationship advice</li>
+                <li>Goal setting and achievement</li>
+                <li>Mindfulness practices</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="guide-card">
+            <h3>🃏 Tarot Readings</h3>
+            <p>Receive intuitive tarot card interpretations for guidance and self-reflection.</p>
+            <ul>
+                <li>Daily card pulls</li>
+                <li>Relationship spreads</li>
+                <li>Career path readings</li>
+                <li>Celtic cross spreads</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="guide-card">
+            <h3>📊 Numerology Reports</h3>
+            <p>Discover your life path, expression, and soul urge numbers for deeper self-understanding.</p>
+            <ul>
+                <li>Life path number analysis</li>
+                <li>Expression number insights</li>
+                <li>Personal year cycles</li>
+                <li>Compatibility analysis</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    st.markdown("""
+    ## Why Choose Cosmic Guide?
+    
+    - **24/7 Availability**: Get guidance anytime, anywhere
+    - **Affordable**: Fraction of the cost of traditional astrologers
+    - **Private**: Your questions and data remain confidential
+    - **Multiple Perspectives**: Choose from different spiritual traditions
+    - **Personalized**: Insights based on your unique birth details
+    - **Interactive**: Draw tarot cards, calculate numerology, and more
+    """)
 
-sidebar()
+def show_pricing_page():
+    st.markdown("# Pricing Plans")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="pricing-card">
+            <h3>Basic</h3>
+            <h2>Free</h2>
+            <p>For those exploring spiritual guidance</p>
+            <hr>
+            <p>✓ 3 questions per day</p>
+            <p>✓ Basic horoscope</p>
+            <p>✖ Personalized reports</p>
+            <p>✖ Priority support</p>
+            <br>
+            <button class="stButton">Start Free</button>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="pricing-card premium">
+            <h3>Premium</h3>
+            <h2>₹299/month</h2>
+            <p>For regular spiritual guidance seekers</p>
+            <hr>
+            <p>✓ Unlimited questions</p>
+            <p>✓ Detailed horoscope</p>
+            <p>✓ 2 personalized reports/month</p>
+            <p>✓ Email support</p>
+            <br>
+            <button class="stButton">Subscribe Now</button>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="pricing-card">
+            <h3>Ultimate</h3>
+            <h2>₹2499/year</h2>
+            <p>For dedicated spiritual practitioners</p>
+            <hr>
+            <p>✓ Unlimited questions</p>
+            <p>✓ Premium horoscope</p>
+            <p>✓ 5 personalized reports/month</p>
+            <p>✓ Priority 24/7 support</p>
+            <br>
+            <button class="stButton">Subscribe Now</button>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    st.markdown("""
+    ## Enterprise Solutions
+    
+    Looking for Cosmic Guide for your organization? We offer custom solutions for:
+    
+    - **Wellness programs** for employees
+    - **White-label solutions** for spiritual businesses
+    - **API access** for developers
+    
+    Contact us at enterprise@cosmicguide.com for more information.
+    """)
 
-tabs = st.tabs(["Home", "Chat", "Tarot", "Numerology", "About"])
-with tabs[0]:
-    page_home()
-with tabs[1]:
-    chat_section()
-with tabs[2]:
-    page_tarot()
-with tabs[3]:
-    page_numerology()
-with tabs[4]:
-    st.markdown("## About Cosmic Guide")
-    st.markdown("<div class='card'>We blend ancient wisdom with modern AI. Use responsibly; treat readings as reflective guidance, not certainties.</div>", unsafe_allow_html=True)
+def show_about_page():
+    st.markdown("# About Cosmic Guide")
+    
+    st.markdown("""
+    Cosmic Guide was founded with a simple mission: to make spiritual guidance accessible, affordable, 
+    and personalized for everyone. We combine ancient spiritual wisdom with modern AI technology to 
+    provide insights that can help you navigate life's challenges.
+    """)
+    
+    if lottie_crystal:
+        st_lottie(lottie_crystal, height=300, key="crystal")
+    
+    st.markdown("""
+    ## Our Values
+    
+    - **Authenticity**: We respect and honor the spiritual traditions we draw from
+    - **Innovation**: We continuously improve our technology to serve you better
+    - **Privacy**: Your data and questions are always kept confidential
+    - **Accessibility**: We believe everyone deserves guidance, regardless of budget
+    
+    ## Frequently Asked Questions
+    
+    **Is this replacing traditional astrologers?**  
+    No, Cosmic Guide is meant to complement traditional guidance, not replace it. We provide affordable 
+    access to basic insights, but for major life decisions, we still recommend consulting with experienced practitioners.
+    
+    **How accurate are the readings?**  
+    Our AI provides guidance based on established spiritual principles and your input. Many users find 
+    our insights helpful and accurate, but as with any form of guidance, your personal interpretation 
+    and intuition are important.
+    
+    **Can I get a refund?**  
+    Yes, we offer a 7-day money-back guarantee on all paid plans if you're not satisfied with the service.
+    
+    **How is my data used?**  
+    We take privacy seriously. Your questions and birth data are used solely to generate your readings 
+    and are never shared with third parties. You can delete your data at any time.
+    """)
 
-# ---------------------------
-# Notes for devs:
-# - To swap model, set env COSMIC_MODEL or change MODEL above.
-# - We keep daily banner/horoscopes cached in st.session_state to reduce token usage.
-# - If birth time is unknown, prompts avoid minute/house specifics to reduce generic-sounding claims while staying safe.
-# - Extend TAROT deck with Minors if you like; current major arcana gives rich reads with low complexity.
+if __name__ == "__main__":
+    main()
