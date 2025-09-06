@@ -56,19 +56,19 @@ st.markdown("""
     .user-message {
         background: linear-gradient(135deg, #6C4AB6 0%, #8D72E1 100%);
         color: white;
-        border-radius: 18px 18px 0 18px;
+        border-radius: 18px;
         padding: 15px 20px;
-        margin: 10px 0;
+        margin: 10px 0 10px auto;
         max-width: 80%;
-        margin-left: auto;
+        box-shadow: 0 5px 15px rgba(108, 74, 182, 0.3);
     }
     
     .assistant-message {
         background: white;
         color: #2D2B4E;
-        border-radius: 18px 18px 18px 0;
+        border-radius: 18px;
         padding: 15px 20px;
-        margin: 10px 0;
+        margin: 10px auto 10px 0;
         max-width: 80%;
         box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
         border: 1px solid #eaeaea;
@@ -308,6 +308,46 @@ st.markdown("""
             opacity: 1;
         }
     }
+    
+    .info-tooltip {
+        position: relative;
+        display: inline-block;
+        margin-left: 5px;
+        cursor: pointer;
+    }
+    
+    .info-tooltip .tooltip-text {
+        visibility: hidden;
+        width: 200px;
+        background-color: #2D2B4E;
+        color: white;
+        text-align: center;
+        border-radius: 6px;
+        padding: 10px;
+        position: absolute;
+        z-index: 1;
+        bottom: 125%;
+        left: 50%;
+        margin-left: -100px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        font-size: 12px;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    }
+    
+    .info-tooltip:hover .tooltip-text {
+        visibility: visible;
+        opacity: 1;
+    }
+    
+    .remedies-pack {
+        background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+        border-radius: 12px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: center;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -332,6 +372,10 @@ if "user_info" not in st.session_state:
     st.session_state.user_info = {}
 if "typing" not in st.session_state:
     st.session_state.typing = False
+if "current_topic" not in st.session_state:
+    st.session_state.current_topic = None
+if "show_remedies_prompt" not in st.session_state:
+    st.session_state.show_remedies_prompt = False
 
 # Load Lottie animations
 def load_lottieurl(url):
@@ -425,6 +469,32 @@ def generate_tarot_reading(question, cards):
     except Exception as e:
         return f"Error generating tarot reading: {str(e)}"
 
+# Detect topic from question
+def detect_topic(question):
+    question_lower = question.lower()
+    
+    if any(word in question_lower for word in ['wealth', 'money', 'rich', 'finance', 'financial', 'prosperity']):
+        return 'wealth'
+    elif any(word in question_lower for word in ['love', 'relationship', 'marriage', 'partner', 'romance', 'dating']):
+        return 'love'
+    elif any(word in question_lower for word in ['career', 'job', 'business', 'work', 'profession', 'vocation']):
+        return 'career'
+    elif any(word in question_lower for word in ['health', 'wellness', 'fitness', 'illness', 'disease', 'medical']):
+        return 'health'
+    elif any(word in question_lower for word in ['education', 'study', 'learning', 'knowledge', 'school', 'college']):
+        return 'education'
+    elif any(word in question_lower for word in ['family', 'children', 'parents', 'siblings', 'home']):
+        return 'family'
+    else:
+        return 'general'
+
+# Check if remedies prompt should be shown
+def should_show_remedies_prompt(topic, conversation_stage):
+    # Show remedies prompt for specific topics at the right conversation stage
+    if topic in ['wealth', 'love', 'career', 'health'] and conversation_stage.get('stage') == 'solutions':
+        return random.random() < 0.7  # 70% chance to show remedies prompt
+    return False
+
 # Generate conversational response with engagement strategy
 def generate_conversational_response(question, user_info, guide, conversation_stage, tarot_cards=None):
     if not st.session_state.api_key_valid:
@@ -433,6 +503,16 @@ def generate_conversational_response(question, user_info, guide, conversation_st
     try:
         from openai import OpenAI
         client = OpenAI(api_key=st.session_state.api_key)
+        
+        # Detect topic
+        current_topic = detect_topic(question)
+        
+        # Reset conversation stage if topic has changed
+        if st.session_state.current_topic and st.session_state.current_topic != current_topic:
+            conversation_stage = {'stage': 'initial', 'topics': [current_topic]}
+        
+        # Update current topic
+        st.session_state.current_topic = current_topic
         
         # Get user name or use a generic term
         user_name = user_info.get("name", "dear seeker")
@@ -445,6 +525,7 @@ def generate_conversational_response(question, user_info, guide, conversation_st
             
             Current conversation stage: {conversation_stage.get('stage', 'initial')}
             Previous topics discussed: {conversation_stage.get('topics', [])}
+            Current topic: {current_topic}
             
             Your response strategy:
             1. For initial questions, provide insights about planetary positions and houses but don't give complete solutions yet
@@ -462,6 +543,7 @@ def generate_conversational_response(question, user_info, guide, conversation_st
             
             Current conversation stage: {conversation_stage.get('stage', 'initial')}
             Previous topics discussed: {conversation_stage.get('topics', [])}
+            Current topic: {current_topic}
             
             Your response strategy:
             1. Interpret the cards in relation to their question but leave room for exploration
@@ -479,6 +561,7 @@ def generate_conversational_response(question, user_info, guide, conversation_st
             
             Current conversation stage: {conversation_stage.get('stage', 'initial')}
             Previous topics discussed: {conversation_stage.get('topics', [])}
+            Current topic: {current_topic}
             
             Your response strategy:
             1. Provide initial insights but encourage deeper exploration
@@ -495,6 +578,7 @@ def generate_conversational_response(question, user_info, guide, conversation_st
             
             Current conversation stage: {conversation_stage.get('stage', 'initial')}
             Previous topics discussed: {conversation_stage.get('topics', [])}
+            Current topic: {current_topic}
             
             Your response strategy:
             1. Share initial numerological insights but leave room for deeper exploration
@@ -533,19 +617,8 @@ def generate_conversational_response(question, user_info, guide, conversation_st
 # Update conversation stage
 def update_conversation_stage(question, response):
     # Extract topic from question
+    current_topic = detect_topic(question)
     topics = st.session_state.conversation_stage.get('topics', [])
-    
-    # Simple topic extraction (can be enhanced)
-    if any(word in question.lower() for word in ['wealth', 'money', 'rich', 'finance']):
-        current_topic = 'wealth'
-    elif any(word in question.lower() for word in ['love', 'relationship', 'marriage', 'partner']):
-        current_topic = 'love'
-    elif any(word in question.lower() for word in ['career', 'job', 'business', 'work']):
-        current_topic = 'career'
-    elif any(word in question.lower() for word in ['health', 'wellness', 'fitness']):
-        current_topic = 'health'
-    else:
-        current_topic = 'general'
     
     if current_topic not in topics:
         topics.append(current_topic)
@@ -562,6 +635,9 @@ def update_conversation_stage(question, response):
         'topics': topics,
         'last_topic': current_topic
     }
+    
+    # Check if we should show remedies prompt
+    st.session_state.show_remedies_prompt = should_show_remedies_prompt(current_topic, st.session_state.conversation_stage)
 
 # Display typing indicator
 def show_typing_indicator():
@@ -570,6 +646,23 @@ def show_typing_indicator():
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Display remedies pack prompt
+def show_remedies_prompt():
+    st.markdown("""
+    <div class="remedies-pack">
+        <h3>✨ Personalized Remedies Pack</h3>
+        <p>Based on your current situation, our astrologers have prepared a personalized remedies pack including:</p>
+        <ul style="text-align: left; display: inline-block;">
+            <li>Specific mantras for your situation</li>
+            <li>Recommended gemstones</li>
+            <li>Planetary rituals</li>
+            <li>Personalized yantra</li>
+        </ul>
+        <p>This comprehensive pack can help enhance the positive energies in your life.</p>
+        <button class="stButton">Explore Remedies Pack</button>
     </div>
     """, unsafe_allow_html=True)
 
@@ -775,6 +868,9 @@ def show_chat_page():
         <div class="highlight-box">
             <h3>🔮 The Tarot Reader</h3>
             <p>Uses tarot cards to provide intuitive guidance. Can help with specific questions about love, career, or personal growth. Expect mystical insights and symbolic interpretations.</p>
+            <div class="info-tooltip">ℹ️
+                <span class="tooltip-text">Click 'Draw 3 Cards' to select your tarot spread, then ask your question for an interpretation.</span>
+            </div>
         </div>
         """, unsafe_allow_html=True)
     elif guide == "The Modern Life Coach":
@@ -824,6 +920,10 @@ def show_chat_page():
             else:
                 st.markdown(f'<div class="assistant-message"><b>{message["guide"]}:</b> {message["content"]}</div>', unsafe_allow_html=True)
         
+        # Show remedies prompt if needed
+        if st.session_state.get("show_remedies_prompt", False):
+            show_remedies_prompt()
+        
         # Show typing indicator if needed
         if st.session_state.get("typing", False):
             show_typing_indicator()
@@ -835,36 +935,34 @@ def show_chat_page():
         with col1:
             if st.button("Wealth and financial prospects", use_container_width=True):
                 st.session_state.messages.append({"role": "user", "content": "Tell me about my wealth and financial prospects"})
-                st.experimental_rerun()
+                st.rerun()
             if st.button("Career path and opportunities", use_container_width=True):
                 st.session_state.messages.append({"role": "user", "content": "What does my career path look like?"})
-                st.experimental_rerun()
+                st.rerun()
         with col2:
             if st.button("Love and relationships", use_container_width=True):
                 st.session_state.messages.append({"role": "user", "content": "Tell me about my love life and relationships"})
-                st.experimental_rerun()
+                st.rerun()
             if st.button("Personal growth", use_container_width=True):
                 st.session_state.messages.append({"role": "user", "content": "How can I grow personally and spiritually?"})
-                st.experimental_rerun()
+                st.rerun()
     
     # Chat input at bottom
     st.markdown("---")
-    question = st.text_input("Ask your question...", key="input", 
+    question = st.chat_input("Ask your question...", key="input", 
                             placeholder="e.g., What does my career horoscope say for this month?")
     
-    col1, col2 = st.columns([1, 6])
-    with col1:
-        send_btn = st.button("Send", use_container_width=True)
-    with col2:
-        clear_btn = st.button("Clear Chat", use_container_width=True)
+    clear_btn = st.button("Clear Chat", use_container_width=True)
     
     if clear_btn:
         st.session_state.messages = []
         st.session_state.tarot_cards = []
         st.session_state.conversation_stage = {}
-        st.experimental_rerun()
+        st.session_state.current_topic = None
+        st.session_state.show_remedies_prompt = False
+        st.rerun()
     
-    if send_btn and question:
+    if question:
         if not st.session_state.api_key_valid:
             st.error("Please enter a valid OpenAI API key in the sidebar to continue.")
         else:
@@ -879,7 +977,7 @@ def show_chat_page():
             
             # Set typing state
             st.session_state.typing = True
-            st.experimental_rerun()
+            st.rerun()
             
             # Generate response
             answer = generate_conversational_response(
@@ -900,7 +998,7 @@ def show_chat_page():
             st.session_state.typing = False
             
             # Rerun to update the chat display
-            st.experimental_rerun()
+            st.rerun()
 
 def show_features_page():
     st.markdown("# Features")
